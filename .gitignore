@@ -1,14 +1,12 @@
-*.mov
-*.avi
-*.mp4
-sample_video/
-models/
-mesh/
-data/
-Python/data/
 outputs/
 .DS_Store
-*.png
-*.jpg
 __pycache__/
- *.pyc
+*.pyc
+mesh/build/
+mesh/psbody_mesh.egg-info/
+data/**/output/
+data/**/frame_velocity/
+data/**/frame_position/
+data/**/video_output_signal.mp4
+tmp/
+*.log
