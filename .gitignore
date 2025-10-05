@@ -10,3 +10,4 @@ data/**/frame_position/
 data/**/video_output_signal.mp4
 tmp/
 *.log
+data/vibe_data/yolov3.weights
