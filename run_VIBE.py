@@ -32,6 +32,8 @@ from lib.utils.demo_utils import (
 )
 import shutil
 
+# Import config for path management
+from config import get_paths
 
 def main(args):
 
@@ -56,10 +58,13 @@ def main(args):
     if not os.path.isfile(video_file):
         exit(f'Input video \"{video_file}\" does not exist!')
 
-    # set output flles
-    output_path = args.output_folder
+    # set output files with new path structure
+    video_name = os.path.basename(video_file).replace('.mp4', '')
+    paths = get_paths(video_name, args.output_folder)
+    output_path = paths['vibe']
+    
     image_folder, num_frames, img_shape = video_to_images(video_file, \
-                    "/tmp/" + output_path.split("/")[-1], return_info=True)
+                    "/tmp/" + video_name, return_info=True)
     print(f'Input video number of frames {num_frames}')
     orig_height, orig_width = img_shape[:2]
 
@@ -104,7 +109,7 @@ def main(args):
 
     # ========= Load pretrained weights ========= #
     pretrained_file = download_ckpt(use_3dpw=False)
-    ckpt = torch.load(pretrained_file)
+    ckpt = torch.load(pretrained_file, weights_only=False)
     print(f'Performance of pretrained model on 3DPW: {ckpt["performance"]}')
     ckpt = ckpt['gen_state_dict']
     model.load_state_dict(ckpt, strict=False)
@@ -118,7 +123,7 @@ def main(args):
     for person_id in tqdm(list(tracking_results.keys())):
         bboxes = tracking_results[person_id]['bbox']
         frames = tracking_results[person_id]['frames']
-        np.save(output_path + "/frames", frames)
+        np.save(os.path.join(output_path, "frames"), frames)
 
         # inference data of each person
         dataset = Inference(
@@ -171,16 +176,16 @@ def main(args):
             'bboxes': bboxes,
             'frame_ids': frames,
         }
-        np.savetxt(output_path + "/pred_cam.csv", pred_cam, delimiter=",")
-        np.savetxt(output_path + "/orig_cam.csv", orig_cam, delimiter=",")
+        np.savetxt(os.path.join(output_path, "pred_cam.csv"), pred_cam, delimiter=",")
+        np.savetxt(os.path.join(output_path, "orig_cam.csv"), orig_cam, delimiter=",")
         vibe_results[person_id] = output_dict 
     del model
 
     frame_results = prepare_rendering_results(vibe_results, len(frames))
-    np.save(output_path + "/frame_results", frame_results)
-    np.save(output_path + "/image_folder", image_folder)
-    np.save(output_path + "/orig_width", orig_width)
-    np.save(output_path + "/orig_height", orig_height)
+    np.save(os.path.join(output_path, "frame_results"), frame_results)
+    np.save(os.path.join(output_path, "image_folder"), image_folder)
+    np.save(os.path.join(output_path, "orig_width"), orig_width)
+    np.save(os.path.join(output_path, "orig_height"), orig_height)
 
 
 if __name__ == '__main__':

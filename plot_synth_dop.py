@@ -6,15 +6,16 @@ from tensorflow.keras.models import load_model
 import pickle
 import cv2
 import argparse
+from config import get_paths
 
 
 def main(args):
 
 	model_path = args.model_path
 
-	lb = pickle.loads(open(model_path+"classifier_classes.lbl", "rb").read())
-	autoencoder = load_model(model_path+"autoencoder_weights.hdf5", custom_objects={'root_mean_squared_error': root_mean_squared_error})
-	scale_vals = np.load(model_path+"scale_vals.npy")
+	lb = pickle.loads(open(os.path.join(model_path, "classifier_classes.lbl"), "rb").read())
+	autoencoder = load_model(os.path.join(model_path, "autoencoder_weights.hdf5"), custom_objects={'root_mean_squared_error': root_mean_squared_error})
+	scale_vals = np.load(os.path.join(model_path, "scale_vals.npy"))
 	fps = 24
 	TIME_CHUNK = 3
 	max_dopVal = scale_vals[0]
@@ -24,13 +25,20 @@ def main(args):
 
 	vid_f = args.input_video
 	in_folder = os.path.dirname(vid_f)
-	vid_file_name = args.input_video.split("/")[-1].split(".")[0]
+	vid_file_name = os.path.basename(vid_f).replace('.mp4', '')
+	
+	# Use config for paths - but check if data exists in 'video' folder first
+	paths = get_paths(vid_file_name, "output")
+	if not os.path.exists(paths['synth_doppler']):
+		# Try with 'video' as the folder name (fallback)
+		paths = get_paths("video", "output")
 
 	cap = cv2.VideoCapture(vid_f)
+	total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-	out_vid = cv2.VideoWriter(in_folder+'/'+vid_file_name+'_output_signal.mp4',cv2.VideoWriter_fourcc(*'MP4V'), fps, (2425,300))
+	out_vid = cv2.VideoWriter(os.path.join(paths['videos'], vid_file_name+'_output_signal.mp4'),cv2.VideoWriter_fourcc(*'XVID'), fps, (2425,300))
 
-	synth_doppler_dat_f = in_folder + "/output/" + vid_file_name + "/synth_doppler.npy"
+	synth_doppler_dat_f = paths['synth_doppler']
 	synth_doppler_dat = np.load(synth_doppler_dat_f)
 	synth_spec_pred = get_spectograms(synth_doppler_dat, TIME_CHUNK, fps, synthetic=True, zero_pad=True)
 	synth_spec_pred = synth_spec_pred.astype("float32")
@@ -51,14 +59,28 @@ def main(args):
 	y_max = max(np.max(decoded),np.max(synth_spec_test),np.max(dop_spec_test))
 	norm = matplotlib.colors.Normalize(vmin=0, vmax=y_max)
 
-	for idx in range(0, len(dop_spec_test)):
-		ret, frame = cap.read()
-		original_synth = color_scale(synth_spec_test[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(synth_spec_test)),"Initial Synthetic Doppler")
-		original_dop = color_scale(dop_spec_test[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(dop_spec_test)),"Real World Doppler")
-		recon = color_scale(decoded[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(decoded)),"Final Synthetic Doppler")
-		in_frame = color_scale(frame,None,"Input Video")
-		output = np.hstack([in_frame,original_dop, original_synth, recon])
-		out_vid.write(output)
+	print(f"Video has {total_frames} frames, Doppler data has {len(dop_spec_test)} frames")
+
+	# Limit to the number of frames available in the video
+	frames_to_process = min(len(dop_spec_test), total_frames)
+	print(f"Processing {frames_to_process} frames")
+
+	for idx in range(0, frames_to_process):
+		try:
+			ret, frame = cap.read()
+			if not ret or frame is None:
+				print(f"Warning: Could not read frame {idx}, skipping...")
+				continue
+			print(f"Processing frame {idx+1}/{frames_to_process}")
+			original_synth = color_scale(synth_spec_test[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(synth_spec_test)),"Initial Synthetic Doppler")
+			original_dop = color_scale(dop_spec_test[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(dop_spec_test)),"Real World Doppler")
+			recon = color_scale(decoded[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(decoded)),"Final Synthetic Doppler")
+			in_frame = color_scale(frame,None,"Input Video")
+			output = np.hstack([in_frame,original_dop, original_synth, recon])
+			out_vid.write(output)
+		except Exception as e:
+			print(f"Error processing frame {idx}: {e}")
+			break
 
 	cap.release()
 	out_vid.release()
