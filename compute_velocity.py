@@ -4,6 +4,7 @@ import math
 import cv2
 import os
 import numpy as np
+from config import get_paths, get_frame_path
 
 
 def main(args):
@@ -12,47 +13,45 @@ def main(args):
     camera_orig = [float(i) for i in args.camera_orig[1:-1].split(',')]
 
     # get video file name
-    video_file = args.input_video.split("/")[-1].split(".")[0]
+    video_name = os.path.basename(args.input_video).replace('.mp4', '')
+    
+    paths = get_paths(video_name, args.output_folder)
+    velocities_dir = paths['velocities']
 
     # get fps of the video
     video = cv2.VideoCapture(args.input_video)
     fps = video.get(cv2.CAP_PROP_FPS)
 
-    # set output flles
-    output_path = os.path.join(args.output_folder, os.path.basename(\
-                                video_file).replace('.mp4', ''))
-    csv_folder_path = os.path.join(output_path, "frame_velocity/")
-    os.makedirs(csv_folder_path, exist_ok=True)
-
     # get the number of frames
-    num_frames = len([name for name in os.listdir(args.output_folder \
-                            + video_file + "/frame_position") \
+    num_frames = len([name for name in os.listdir(paths['positions']) \
                             if "frame_" in  name])
 
     # read frame info as numpy arrays from csv files
     vertex_position = []
     vertex_visibilty = []
 
-    if os.path.isfile(output_path + \
-                "/../../frames_new.npy"):
-        frames = np.load(output_path + \
-                    "/../../frames_new.npy", allow_pickle=True)
+    if os.path.isfile(paths['frames_new']):
+        frames = np.load(paths['frames_new'], allow_pickle=True)
     else:
-        frames = np.load(output_path + \
-                    "/../../frames.npy", allow_pickle=True)
+        frames = np.load(paths['frames'], allow_pickle=True)
 
     for frame_idx in frames:
 
         # read frame info for human body
-        frame_info = np.genfromtxt(args.output_folder + video_file \
-            + "/frame_position/frame_%06d.csv" \
-                            % frame_idx, delimiter=',')
+        position_file = get_frame_path(paths, 'positions', frame_idx)
+        frame_info = np.genfromtxt(position_file, delimiter=',')
         vertex_position.append(frame_info[:, :3])
         vertex_visibilty.append(frame_info[:, 3:])
 
     # change position and visibility lists to numpy arrays
     vertex_position = np.array(vertex_position)
     vertex_visibilty = np.array(vertex_visibilty)
+
+    # get camera transformation
+    if os.path.isfile(paths['orig_cam_new']):
+        orig_cameras = np.genfromtxt(paths['orig_cam_new'], delimiter=',')
+    else:
+        orig_cameras = np.genfromtxt(paths['orig_cam'], delimiter=',')
 
 
     # compute radial velocity for human body
@@ -99,8 +98,8 @@ def main(args):
 
 
         # save each vertex velocity and visibility
-        np.savetxt(csv_folder_path + "frame_%06d.csv" % frame_idx, \
-                                            frame_info, delimiter=",")
+        velocity_file = get_frame_path(paths, 'velocities', frame_idx)
+        np.savetxt(velocity_file, frame_info, delimiter=",")
 
         index += 1
 

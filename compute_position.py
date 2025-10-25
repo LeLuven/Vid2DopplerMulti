@@ -5,33 +5,23 @@ import argparse
 import numpy as np
 from velocity_renderer import VelocityRenderer
 import shutil
+from config import get_paths, get_frame_path
 
 def main(args):
 
     # get input video
     video_file = args.input_video
+    video_name = os.path.basename(video_file).replace('.mp4', '')
+    
+    paths = get_paths(video_name, args.output_folder)
 
-    # define output path
-    output_path = os.path.join(args.output_folder, \
-                os.path.basename(video_file).replace('.mp4', ''))
-    csv_folder_path = os.path.join(output_path, "frame_position/")
-
-    output_path = os.path.join(args.output_folder, os.path.basename(video_file).replace('.mp4', ''))
-    os.makedirs(output_path, exist_ok=True)
-    os.makedirs(csv_folder_path, exist_ok=True)
-
-    # get defined parameters
-    image_folder = str(np.load(output_path + "/../../image_folder.npy"))
-    orig_width = np.load(output_path + "/../../orig_width.npy", \
-                                            allow_pickle=True)
-    orig_height = np.load(output_path + "/../../orig_height.npy", \
-                                            allow_pickle=True)
+    image_folder = str(np.load(paths['image_folder']))
+    orig_width = np.load(paths['orig_width'], allow_pickle=True)
+    orig_height = np.load(paths['orig_height'], allow_pickle=True)
 
     # get frame results
-    frame_results = np.load(output_path + \
-                    "/../../frame_results.npy", allow_pickle=True)
-    frames = np.load(output_path + \
-                    "/../../frames.npy", allow_pickle=True)
+    frame_results = np.load(paths['frame_results'], allow_pickle=True)
+    frames = np.load(paths['frames'], allow_pickle=True)
 
     # define a renderer
     renderer = VelocityRenderer(resolution=(orig_width, \
@@ -63,8 +53,8 @@ def main(args):
         # save each vertex position, velocity and visibility
         save_body_csv = True
         if save_body_csv:
-            with open(csv_folder_path + "frame_%06d.csv" \
-                        % frame_idx, mode='w') as frame_info:
+            frame_file = get_frame_path(paths, 'positions', frame_idx)
+            with open(frame_file, mode='w') as frame_info:
                 frame_info_writer = csv.writer(frame_info, \
                     delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
                 for i in range(len(frame_verts)):

@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 from velocity_renderer import VelocityRenderer
 import colorsys
+from config import get_paths, get_frame_path
 
 
 def main(args):
@@ -21,7 +22,10 @@ def main(args):
     camera_orig = [float(i) for i in args.camera_orig[1:-1].split(',')]
 
     # get video file name
-    video_file = args.input_video.split("/")[-1].split(".")[0]
+    video_name = os.path.basename(args.input_video).replace('.mp4', '')
+    
+    # Get paths using config
+    paths = get_paths(video_name, args.output_folder)
 
     # get fps of the video
     video = cv2.VideoCapture(args.input_video)
@@ -30,29 +34,23 @@ def main(args):
     # define video writer
     fourcc = cv2.VideoWriter_fourcc('D', 'I', 'V', 'X')
     if args.wireframe:
-        out = cv2.VideoWriter(args.output_folder + video_file + "/" + video_file \
-                            + "_result_wireframe.mp4", fourcc, fps, \
+        out = cv2.VideoWriter(os.path.join(paths['videos'], f'{video_name}_result_wireframe.mp4'), fourcc, fps, \
                             (int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), \
                             int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))))
     else:
-        out = cv2.VideoWriter(args.output_folder + video_file + "/" + video_file \
-                            + "_result_mesh.mp4", fourcc, fps, \
+        out = cv2.VideoWriter(os.path.join(paths['videos'], f'{video_name}_result_mesh.mp4'), fourcc, fps, \
                             (int(video.get(cv2.CAP_PROP_FRAME_WIDTH)), \
                             int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))))
 
     # get the number of frames
     num_frames = len([name for name in \
-            os.listdir(args.output_folder + video_file + "/frame_position") \
+            os.listdir(paths['positions']) \
             if "frame_" in name])
-    output_path = os.path.join(args.output_folder, os.path.basename(\
-                                video_file).replace('.mp4', ''))
-    if os.path.isfile(output_path + \
-                "/../../frames_new.npy"):
-        frames = np.load(output_path + \
-                    "/../../frames_new.npy", allow_pickle=True)
+            
+    if os.path.isfile(paths['frames_new']):
+        frames = np.load(paths['frames_new'], allow_pickle=True)
     else:
-        frames = np.load(output_path + \
-                    "/../../frames.npy", allow_pickle=True)
+        frames = np.load(paths['frames'], allow_pickle=True)
     print("visualized frames: ", len(frames))
 
     # read frame info as numpy arrays from csv files
@@ -62,11 +60,12 @@ def main(args):
     for frame_idx in frames:
 
         # read frame info for human body
-        frame_info = np.genfromtxt(args.output_folder + video_file \
-            + "/frame_position/frame_%06d.csv" % frame_idx, delimiter=',')
+        position_file = get_frame_path(paths, 'positions', frame_idx)
+        frame_info = np.genfromtxt(position_file, delimiter=',')
         vertex_position.append(frame_info[:, :3])
-        frame_info = np.genfromtxt(args.output_folder + video_file \
-            + "/frame_velocity/frame_%06d.csv" % frame_idx, delimiter=',')
+        
+        velocity_file = get_frame_path(paths, 'velocities', frame_idx)
+        frame_info = np.genfromtxt(velocity_file, delimiter=',')
         vertex_velocity.append(frame_info[:, 0])
 
 
@@ -74,8 +73,7 @@ def main(args):
     num_vertices = vertex_position[0].shape[0]
 
     # get predicted camera positions from the model
-    orig_cameras = np.genfromtxt(args.output_folder + video_file \
-                + "/../../orig_cam.csv", delimiter=',')
+    orig_cameras = np.genfromtxt(paths['orig_cam'], delimiter=',')
 
     # change position and velocity lists to numpy arrays
     vertex_position = np.array(vertex_position)

@@ -1,12 +1,62 @@
+# Output directories and files
+output/
 outputs/
-.DS_Store
+data/**/output/
+
+# Temporary files and directories
+tmp/
+/tmp/
+*.log
+
+# Python cache files
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# IDE and editor files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Mesh build files
 mesh/build/
 mesh/psbody_mesh.egg-info/
-data/**/output/
+
+# Generated data files (old structure)
 data/**/frame_velocity/
 data/**/frame_position/
 data/**/video_output_signal.mp4
-tmp/
-*.log
+
+# Generated videos and data files (new structure)
+**/videos/*.mp4
+**/doppler/*.npy
+**/velocities/frame_*.csv
+**/positions/frame_*.csv
+**/vibe/*.npy
+**/vibe/*.csv
+
+# Model checkpoints and weights
+*.pth
+*.pth.tar
+*.hdf5
+*.h5
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Environment files
+.env
+.venv/
+venv/
+env/
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
