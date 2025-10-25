@@ -39,7 +39,7 @@ def main(args):
 
     # check GPU availability
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
+    print(f"Using Device: {device}")
     # get input video
     video_file = args.input_video
 

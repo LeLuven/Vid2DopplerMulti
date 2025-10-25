@@ -10,7 +10,7 @@ from config import get_paths
 
 
 def main(args):
-
+	out_vid = None
 	model_path = args.model_path
 
 	lb = pickle.loads(open(os.path.join(model_path, "classifier_classes.lbl"), "rb").read())
@@ -71,19 +71,34 @@ def main(args):
 			if not ret or frame is None:
 				print(f"Warning: Could not read frame {idx}, skipping...")
 				continue
-			print(f"Processing frame {idx+1}/{frames_to_process}")
+			print(f"\rProcessing frame {idx+1}/{frames_to_process}", end="")
 			original_synth = color_scale(synth_spec_test[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(synth_spec_test)),"Initial Synthetic Doppler")
 			original_dop = color_scale(dop_spec_test[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(dop_spec_test)),"Real World Doppler")
 			recon = color_scale(decoded[idx],matplotlib.colors.Normalize(vmin=0, vmax=np.max(decoded)),"Final Synthetic Doppler")
 			in_frame = color_scale(frame,None,"Input Video")
 			output = np.hstack([in_frame,original_dop, original_synth, recon])
-			out_vid.write(output)
+			if out_vid is None:
+				frame_height = output.shape[0]
+				frame_width = output.shape[1]
+				print(f"\nInitialisiere VideoWriter mit Größe {frame_width}x{frame_height} und Codec 'mp4v'")
+
+				out_vid = cv2.VideoWriter(os.path.join(paths['videos'], vid_file_name+'_output_signal.mp4'),
+                                          cv2.VideoWriter_fourcc(*'mp4v'), 
+                                          fps,
+                                          (frame_width, frame_height))     
+            
+			out_vid.write(output.astype(np.uint8))
+
 		except Exception as e:
 			print(f"Error processing frame {idx}: {e}")
 			break
 
 	cap.release()
-	out_vid.release()
+	if out_vid is not None:
+		out_vid.release()
+		print(f"Output-Video gespeichert in: {paths['videos']}")
+	else:
+		print("Keine Frames verarbeitet, kein Video gespeichert.")
 
 
 if __name__ == '__main__':
