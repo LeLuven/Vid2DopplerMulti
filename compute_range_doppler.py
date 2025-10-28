@@ -1,196 +1,257 @@
 #!/usr/bin/env python3
 """
-Konvertierung der synthetischen Doppler-Daten in Radar-Format (168 x 125 Range-Doppler Maps)
+Erzeugt aus Vid2Doppler-Zwischendaten echte Range-Doppler-Maps,
+in zwei Varianten:
+  1) RAW  : (T, vel*, range)  = (T, 125, 168)
+  2) DEMO : (T, range, vel*)  = (T, 168, 125), log10+Clipping auf [3.4, 3.9]
+
+Damit ist DEMO sofort in show_falsecolor o.ä. nutzbar.
 """
 
 import os
 import argparse
 import numpy as np
-import pandas as pd
-from config import get_paths, get_frame_path, RANGE_MIN, RANGE_MAX, RANGE_BINS, VELOCITY_MIN, VELOCITY_MAX, VELOCITY_BINS, VELOCITY_MASK_BINS, RADAR_FPS, EFFECTIVE_VELOCITY_BINS
+import cv2
+from config import (
+    get_paths, get_frame_path,
+    RANGE_MIN, RANGE_MAX, RANGE_BINS,
+    VELOCITY_MIN, VELOCITY_MAX, VELOCITY_BINS, VELOCITY_MASK_BINS,
+    RADAR_FPS,
+    LOG_EPS, LOG_CLIP_MIN, LOG_CLIP_MAX, LOG_SCALE_DEFAULT
+)
 
-def calculate_range_from_positions(positions_df):
-    """
-    Berechnet Range aus 3D-Vertex-Positionen
-    Fallback: Wenn keine Kamera-Info, nimm z-Koordinate als Tiefe
-    """
-    # Da CSV ohne Header geladen wird, verwende Spalten-Indizes
-    # Spalten: x, y, z, visibility
-    if positions_df.shape[1] >= 3:
-        # Euklidische Distanz vom Kamera-Ursprung
-        ranges = np.sqrt(positions_df.iloc[:, 0]**2 + positions_df.iloc[:, 1]**2 + positions_df.iloc[:, 2]**2)
-    else:
-        # Fallback: z-Koordinate als Tiefe
-        ranges = positions_df.iloc[:, 2]  # Annahme: z ist in Spalte 2
-    
-    return ranges
+def parse_camera_position(s: str) -> np.ndarray:
+    s = s.strip().replace('[','').replace(']','')
+    x, y, z = (float(t.strip()) for t in s.split(','))
+    return np.array([x, y, z], dtype=np.float32)
 
-def create_range_doppler_histogram(velocities, ranges, visibility):
+def load_frame_position_csv(path):
     """
-    Erstellt 2D-Histogramm (Range x Velocity) für ein Frame
+    CSV-Spalten: x, y, z, visibility
+    Rückgabe: (N,3) Positions, (N,) Visibility
     """
-    # Filtere nur sichtbare Vertices
-    visible_mask = visibility > 0.5
-    visible_velocities = velocities[visible_mask]
-    visible_ranges = ranges[visible_mask]
-    
-    if len(visible_velocities) == 0:
-        # Leeres Histogramm wenn keine sichtbaren Vertices
-        return np.zeros((RANGE_BINS, VELOCITY_BINS), dtype=np.float32)
-    
-    # Erstelle 2D-Histogramm
-    histogram, _, _ = np.histogram2d(
-        visible_ranges, 
-        visible_velocities,
-        bins=[RANGE_BINS, VELOCITY_BINS],
-        range=[[RANGE_MIN, RANGE_MAX], [VELOCITY_MIN, VELOCITY_MAX]]
-    )
-    
-    # Normalisiere durch Anzahl sichtbarer Vertices
-    histogram = histogram.astype(np.float32)
-    if len(visible_velocities) > 0:
-        histogram /= len(visible_velocities)
-    
-    return histogram.T  # Transponieren für korrekte Orientierung (velocity x range)
+    assert os.path.exists(path), f"Datei nicht gefunden: {path}"
+    arr = np.genfromtxt(path, delimiter=',')
+    assert arr.shape[1] == 4, f"Falsche Anzahl von Spalten in {path}"
 
-def apply_velocity_masking(histogram):
-    """
-    Entfernt mittlere 3 Doppler-Bins (analog zu demo.py)
-    """
-    # Entferne Bins bei ~0 m/s
-    masked_histogram = np.delete(histogram, VELOCITY_MASK_BINS, axis=0)
-    return masked_histogram
+    pos = arr[:, :3].astype(np.float32)
+    vis = arr[:, 3].astype(np.float32)
+    return pos, vis
 
-def zero_interpolation(data):
+
+def load_frame_velocity_csv(path):
     """
-    Implementiert Convolution-basierte Interpolation für Null-Werte
+    CSV-Spalten: radial_velocity, visibility
+    Rückgabe: (N,) vel, (N,) vis
+    """
+    assert os.path.exists(path), f"Datei nicht gefunden: {path}"
+
+    arr = np.genfromtxt(path, delimiter=',')
+    assert arr.shape[1] == 2, f"Falsche Anzahl von Spalten in {path}"
+
+    vel = arr[:, 0].astype(np.float32)
+    vis = arr[:, 1].astype(np.float32)
+    return vel, vis
+
+def compute_distance(pos: np.ndarray, sensor_position: np.ndarray) -> np.ndarray:
+    """
+    Computes the distance between the sensor and the points.
+    pos: (N,3) array of points
+    sensor_position: (3,) array of sensor position
+    Returns: (N,) array of distances
+    """
+    return np.linalg.norm(pos - sensor_position[None, :], axis=1) 
+
+
+def zero_interpolate(data: np.ndarray) -> np.ndarray:
+    """
+    Füllt 0-Werte durch Mittelung der Nachbarwerte.
+    data: (H, W)
     """
     kernel = np.array([[0, 1, 0],
                        [1, 0, 1],
                        [0, 1, 0]])
     kernel = kernel / np.sum(kernel)
-    
-    for t in range(data.shape[0]):
-        d = data[t].copy()
-        d_mean = np.zeros_like(d)
-        
-        # Convolution für jeden Channel separat
-        for i in range(d.shape[1]):
-            d_mean[:, i] = np.convolve(d[:, i], kernel[1, :], mode='same')
-        
-        # Fülle nur Null-Werte
-        d[d == 0] = d_mean[d == 0]
-        data[t] = d
-    
-    return data
 
-def temporal_resampling(range_doppler_maps, video_fps):
+    from scipy.signal import convolve2d
+
+    d_filled = data.copy()
+    d_mean = convolve2d(d_filled, kernel, mode='same', boundary='symm')
+    d_filled[d_filled == 0] = d_mean[d_filled == 0]
+    return d_filled
+
+
+def create_range_doppler_histogram(range: np.ndarray, velocity: np.ndarray, visibility: np.ndarray) -> np.ndarray:
     """
-    Downsampling von Video-FPS auf Radar-FPS durch Frame-Mittelung
+    2D-Histogramm über (Range, Velocity).
+    Rückgabe: (velocity, range) = (VELOCITY_BINS, RANGE_BINS)
     """
-    window_size = int(video_fps / RADAR_FPS)
-    num_frames = len(range_doppler_maps)
-    num_radar_frames = int(num_frames / window_size)
-    
-    resampled_maps = []
-    
-    for i in range(num_radar_frames):
-        start_idx = i * window_size
-        end_idx = min(start_idx + window_size, num_frames)
-        
-        # Mittelwert über Zeitfenster
-        window_maps = range_doppler_maps[start_idx:end_idx]
-        averaged_map = np.mean(window_maps, axis=0)
-        resampled_maps.append(averaged_map)
-    
-    return np.array(resampled_maps, dtype=np.float32)
+    if visibility.sum() == 0:
+        return np.zeros((VELOCITY_BINS, RANGE_BINS), dtype=np.float32)
+
+    H, _, _ = np.histogram2d(
+        range[visibility], velocity[visibility],
+        bins=(RANGE_BINS, VELOCITY_BINS),
+        range=((RANGE_MIN, RANGE_MAX), (VELOCITY_MIN, VELOCITY_MAX)),
+    )
+    H = H.astype(np.float32)
+    # H /= max(1, vis.sum())               # optionale Normierung
+    return H.T                          # (range, velocity)
+
+def apply_velocity_mask(H_velocity_range: np.ndarray) -> np.ndarray:
+    """
+    Entfernt die mittleren Doppler-Bins (DC-Notch).
+    Eingabe:  (vel=128, range=168)
+    Ausgabe:  (vel*=125, range=168)   (bei 3 entfernten Spalten)
+    """
+    if not VELOCITY_MASK_BINS:
+        return H_velocity_range
+    keep_indices = [i for i in range(H_velocity_range.shape[0])
+                    if i not in set(VELOCITY_MASK_BINS)]
+    return H_velocity_range[keep_indices, :]
+
+def enforce_strict_visibility_equality(visibility_from_positions: np.ndarray,
+                                       visibility_from_velocity: np.ndarray,
+                                       frame_index: int) -> np.ndarray:
+    """
+    Erzwingt identische Sichtbarkeit (0/1) zwischen beiden Quellen.
+    Bricht mit klarer Fehlermeldung ab, falls irgendein Vertex abweicht.
+    """
+    assert visibility_from_positions.shape == visibility_from_velocity.shape, \
+        f"[E] Frame {frame_index:06d}: Visibility length differs: pos={visibility_from_positions.shape}, vel={visibility_from_velocity.shape}"
+
+    visibility_from_positions = np.nan_to_num(visibility_from_positions > 0.5, nan=False)
+    visibility_from_velocity = np.nan_to_num(visibility_from_velocity > 0.5, nan=False)
+
+    mismatch_indices = np.flatnonzero(visibility_from_positions ^ visibility_from_velocity)
+    if mismatch_indices.size > 0:
+        raise AssertionError(f"Sichtbarkeiten unterscheiden sich im Frame {frame_index:06d}!")
+    return visibility_from_positions  
+
+def to_demo_format(H_range_velocity_masked: np.ndarray, log_scale: float, do_log_clip: bool = True) -> np.ndarray:
+    """
+    (vel*, range) -> (range, vel*)
+    + vertikal flip (Range-Ursprung oben)
+    + optional: log10 + Clipping [3.4..3.9]
+    """
+    H_range_velocity = H_range_velocity_masked.T  # (range, vel*)
+    H_range_velocity = np.flipud(H_range_velocity)  # Range nach oben
+
+    if not do_log_clip:
+        return H_range_velocity
+
+    # log10 & Clipping
+    H_log = np.log10(H_range_velocity * float(log_scale) + LOG_EPS)
+    H_log = np.clip(H_log, LOG_CLIP_MIN, LOG_CLIP_MAX)
+    return H_log
+
+
+def temporal_resample_to_radar_fps(frames_arr: np.ndarray, input_fps: float) -> np.ndarray:
+    """
+    frames_arr: (T, H, W) → Mittelung von Video-FPS auf RADAR_FPS (12.5 Hz)
+    """
+    if input_fps <= 0:
+        return frames_arr
+    window = max(1, int(round(input_fps / RADAR_FPS)))
+    out = []
+    for i in range(0, frames_arr.shape[0], window):
+        out.append(frames_arr[i:i + window].mean(axis=0))
+    return np.asarray(out, dtype=np.float32)
+
+
+def auto_calibrate_log_scale(frames_rv, percentile=95, target_db=3.7):
+    """
+    Wählt LOG-Skalierung so, dass der P95 der Nicht-Null-Werte ~ target_db wird.
+    Idee:  log10(s * x) ≈ target_db  =>  s ≈ 10^target_db / median(P95)
+    """
+    vals = []
+    for H in frames_rv[: min(10, len(frames_rv))]:  # nimm die ersten ~10 Frames
+        nz = H[H > 0]
+        if nz.size:
+            vals.append(np.percentile(nz, percentile))
+    if not vals:
+        return LOG_SCALE_DEFAULT
+    p95 = float(np.median(vals))
+    s = (10.0 ** target_db) / max(p95, 1e-9)
+    return s
+
 
 def main(args):
-    print(f"Konvertierung zu Range-Doppler-Maps für Video: {args.input_video}")
-    
-    # Pfade initialisieren
-    video_file = args.input_video
-    video_name = os.path.basename(video_file).replace('.mp4', '')
+    video_name = os.path.basename(args.input_video).rsplit('.', 1)[0]
     paths = get_paths(video_name, args.output_folder)
-    
-    # Lade Frame-Informationen
-    frames = np.load(paths['frames'], allow_pickle=True)
-    print(f"Verarbeitung von {len(frames)} Frames")
-    
-    # Bestimme Video-FPS aus Frame-Anzahl und geschätzter Dauer
-    # Annahme: ~24s Video basierend auf vorherigen Tests
-    estimated_duration = 24.0  # Sekunden
-    video_fps = len(frames) / estimated_duration
-    print(f"Geschätzte Video-FPS: {video_fps:.1f}")
-    
-    range_doppler_maps = []
-    
-    # Verarbeite jedes Frame
-    for i, frame_idx in enumerate(frames):
-        if i % 100 == 0:
-            print(f"Verarbeitung Frame {i+1}/{len(frames)} (Frame {frame_idx})")
-        
-        try:
-            # Lade Positionen und Geschwindigkeiten
-            positions_path = get_frame_path(paths, 'positions', frame_idx)
-            velocities_path = get_frame_path(paths, 'velocities', frame_idx)
-            
-            if not os.path.exists(positions_path) or not os.path.exists(velocities_path):
-                print(f"Warnung: Frame {frame_idx} nicht gefunden, überspringe...")
-                continue
-            
-            # Lade Daten (ohne Header, da erste Zeile Daten enthält)
-            positions_df = pd.read_csv(positions_path, header=None)
-            velocities_df = pd.read_csv(velocities_path, header=None)
-            
-            # Berechne Range aus Positionen
-            ranges = calculate_range_from_positions(positions_df)
-            
-            # Extrahiere Geschwindigkeiten und Visibility
-            velocities = velocities_df.iloc[:, 0].values  # Spalte 0: radiale Geschwindigkeit
-            visibility = velocities_df.iloc[:, 1].values  # Spalte 1: visibility
-            
-            # Erstelle Range-Doppler-Histogramm
-            histogram = create_range_doppler_histogram(velocities, ranges, visibility)
-            
-            # Wende Velocity-Maskierung an
-            masked_histogram = apply_velocity_masking(histogram)
-            
-            range_doppler_maps.append(masked_histogram)
-            
-        except Exception as e:
-            print(f"Fehler bei Frame {frame_idx}: {e}")
-            continue
-    
-    if len(range_doppler_maps) == 0:
-        print("Fehler: Keine Range-Doppler-Maps erstellt!")
-        return
-    
-    range_doppler_maps = np.array(range_doppler_maps, dtype=np.float32)
-    print(f"Erstellt {len(range_doppler_maps)} Range-Doppler-Maps mit Shape: {range_doppler_maps.shape}")
-    
-    # Optional: Zero-Interpolation
-    if args.interpolate:
-        print("Wende Zero-Interpolation an...")
-        range_doppler_maps = zero_interpolation(range_doppler_maps)
-    
-    # Temporal Resampling
-    print(f"Temporal Resampling von {video_fps:.1f} Hz auf {RADAR_FPS} Hz...")
-    resampled_maps = temporal_resampling(range_doppler_maps, video_fps)
-    print(f"Resampled zu {len(resampled_maps)} Radar-Frames")
-    
-    # Speichere Ergebnis
-    output_path = paths['range_doppler_maps']
-    np.save(output_path, resampled_maps)
-    print(f"Range-Doppler-Maps gespeichert: {output_path}")
-    print(f"Finale Shape: {resampled_maps.shape}")
-    print(f"Daten-Range: {resampled_maps.min():.6f} bis {resampled_maps.max():.6f}")
+
+    sensor_position = parse_camera_position(args.sensor_position)
+
+    # Video-FPS lesen (für Resampling)
+    cap = cv2.VideoCapture(args.input_video)
+    in_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    cap.release()
+    print(f"[INFO] Video-FPS: {in_fps:.3f}, RADAR_FPS: {RADAR_FPS}")
+
+    # Alle Frame-Indizes bestimmen (anhand Positions-Dateien)
+    # frame_000000.csv, frame_000001.csv, ...
+    pos_dir = paths['positions']
+    frames = sorted([int(f.split('_')[-1].split('.')[0]) for f in os.listdir(pos_dir) if
+                     f.startswith('frame_') and f.endswith('.csv')])
+
+    raw_velocity_range = []  # (T, vel*, range) = (T, 125, 168)
+    demo_range_velocity = []  # (T, range, vel*)  = (T, 168, 125) [log10+clip]
+
+    # Erst: ohne log skalieren, um LOG_SCALE auto zu kalibrieren
+    tmp_demo_range_velocity_no_log = []
+
+    for idx in frames:
+        pos_file = get_frame_path(paths, 'positions', idx)
+        vel_file = get_frame_path(paths, 'velocities', idx)
+
+        pos, vis_p = load_frame_position_csv(pos_file)
+        velocity, vis_v = load_frame_velocity_csv(vel_file)
+
+        assert pos is not None, f"Fehlende Positions-Datei: {pos_file}"
+        assert velocity is not None, f"Fehlende Velocities-Datei: {vel_file}"
+
+        range_values = compute_distance(pos, sensor_position)
+        print(f"[DBG] rng {range_values.min():.2f}..{range_values.max():.2f}  vel {velocity.min():.2f}..{velocity.max():.2f}")
+
+        visibility = enforce_strict_visibility_equality(vis_p, vis_v, idx)
+
+        H_range_velocity = create_range_doppler_histogram(velocity=velocity, range=range_values, visibility=visibility)  # (range=168, velocity=128)
+        H_range_velocity = apply_velocity_mask(H_range_velocity)  # (range=168, velocity*=125)
+
+        raw_velocity_range.append(H_range_velocity)
+        tmp_demo_range_velocity_no_log.append(zero_interpolate(np.flipud(H_range_velocity.T)))  # (range, vel*) ohne log
+
+    raw_velocity_range = np.asarray(raw_velocity_range, dtype=np.float32)  # (T, 125, 168)
+    tmp_demo_range_velocity_no_log = np.asarray(tmp_demo_range_velocity_no_log, np.float32)  # (T, 168, 125)
+
+    raw_velocity_range = temporal_resample_to_radar_fps(raw_velocity_range, in_fps)
+    tmp_demo_range_velocity_no_log = temporal_resample_to_radar_fps(tmp_demo_range_velocity_no_log, in_fps)
+
+    if args.log_scale == 'auto':
+        log_scale = auto_calibrate_log_scale(tmp_demo_range_velocity_no_log, percentile=95, target_db=3.7)
+        print(f"[INFO] auto LOG_SCALE ≈ {log_scale:.3g}")
+    else:
+        log_scale = float(args.log_scale)
+
+    demo_range_velocity = np.log10(tmp_demo_range_velocity_no_log * float(log_scale) + LOG_EPS)
+    demo_range_velocity = np.clip(demo_range_velocity, LOG_CLIP_MIN, LOG_CLIP_MAX).astype(np.float32)  # (T, 168, 125)
+
+    np.save(paths['range_doppler_maps'], raw_velocity_range )
+    np.save(paths['range_doppler_maps_demo'], demo_range_velocity)
+
+    print(
+        f"[OK] RAW  saved: {paths['range_doppler_maps']}        shape={raw_velocity_range.shape}  (T, vel*, range) = (T,125,168)")
+    print(
+        f"[OK] DEMO saved: {paths['range_doppler_maps_demo']}   shape={demo_range_velocity.shape} (T, range, vel*) = (T,168,125)")
+    print(
+        f"[OK] DEMO value range (min..max): {float(demo_range_velocity.min()):.3f} .. {float(demo_range_velocity.max()):.3f}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Konvertierung zu Range-Doppler-Maps')
+    parser = argparse.ArgumentParser()
     parser.add_argument('--input_video', required=True, help='Pfad zum Eingabe-Video')
     parser.add_argument('--output_folder', default='output', help='Ausgabe-Ordner')
-    parser.add_argument('--interpolate', action='store_true', help='Zero-Interpolation aktivieren')
-    
+    parser.add_argument('--sensor_position', default='[0,0,0]', help='Position des Sensors (x,y,z)')
+    parser.add_argument('--log_scale', default='auto', help="Skalierungsfaktor vor log10 (Zahl oder 'auto')")
     args = parser.parse_args()
     main(args)
