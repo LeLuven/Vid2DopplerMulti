@@ -140,7 +140,7 @@ def main(args):
         frames = dataset.frames
        
         # load data
-        dataloader = DataLoader(dataset, batch_size=args.vibe_batch_size, num_workers=16)
+        dataloader = DataLoader(dataset, batch_size=args.vibe_batch_size, num_workers=8)
 
         # extract data
         with torch.no_grad():
