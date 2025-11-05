@@ -93,7 +93,7 @@ class VIBE(nn.Module):
         self.regressor = Regressor()
 
         if pretrained and os.path.isfile(pretrained):
-            pretrained_dict = torch.load(pretrained)['model']
+            pretrained_dict = torch.load(pretrained, map_location=torch.device('cpu'))['model']
 
             self.regressor.load_state_dict(pretrained_dict, strict=False)
             print(f'=> loaded pretrained model from \'{pretrained}\'')
@@ -144,14 +144,14 @@ class VIBE_Demo(nn.Module):
         )
 
         self.hmr = hmr()
-        checkpoint = torch.load(pretrained)
+        checkpoint = torch.load(pretrained, map_location=torch.device('cpu'))
         self.hmr.load_state_dict(checkpoint['model'], strict=False)
 
         # regressor can predict cam, pose and shape params in an iterative way
         self.regressor = Regressor()
 
         if pretrained and os.path.isfile(pretrained):
-            pretrained_dict = torch.load(pretrained)['model']
+            pretrained_dict = torch.load(pretrained, map_location=torch.device('cpu'))['model']
 
             self.regressor.load_state_dict(pretrained_dict, strict=False)
             print(f'=> loaded pretrained model from \'{pretrained}\'')

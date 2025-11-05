@@ -440,7 +440,11 @@ def get_regressor_output(features):
 
     batch_size, seqlen = features.shape[:2]
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cpu'
+    if torch.cuda.is_available():
+        device = 'cuda'  
+    elif torch.xpu.is_available(): 
+        device = 'xpu'
 
     model = Regressor().to(device)
 

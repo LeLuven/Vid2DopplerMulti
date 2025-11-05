@@ -228,9 +228,9 @@ all_extensions = _get_all_extensions()
 additional_kwargs = {}
 if has_setup_tools:
     # setup tools required for the 'setup_requires' ...
-    additional_kwargs['setup_requires'] = ['setuptools', 'numpy']
+    additional_kwargs['setup_requires'] = ['setuptools', 'numpy<2.0.0']
     additional_kwargs['install_requires'] = [
-        'numpy >= 1.8',
+        'numpy <2.0.0',
         'opencv-python',
         'pillow',
         'pyopengl',

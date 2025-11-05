@@ -38,7 +38,11 @@ from config import get_paths
 def main(args):
 
     # check GPU availability
-    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    device= torch.device('cpu')
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif torch.xpu.is_available():
+        device = torch.device('xpu')
     print(f"Using Device: {device}")
     # get input video
     video_file = args.input_video
@@ -109,7 +113,7 @@ def main(args):
 
     # ========= Load pretrained weights ========= #
     pretrained_file = download_ckpt(use_3dpw=False)
-    ckpt = torch.load(pretrained_file, weights_only=False)
+    ckpt = torch.load(pretrained_file, map_location=torch.device('cpu'), weights_only=False)
     print(f'Performance of pretrained model on 3DPW: {ckpt["performance"]}')
     ckpt = ckpt['gen_state_dict']
     model.load_state_dict(ckpt, strict=False)
