@@ -33,7 +33,11 @@ def extract_features(model, video, bbox, debug=False, batch_size=200, kp_2d=None
     :param batch_size: batch size for HMR input
     :return: features: resnet50 features np.ndarray -> shape (num_frames, 4)
     '''
-    device = 'cuda'
+    device = 'cpu'
+    if torch.cuda.is_available():
+        device = 'cuda'  
+    elif torch.xpu.is_available(): 
+        device = 'xpu'
 
     if isinstance(video, torch.Tensor) or isinstance(video, np.ndarray):
         video = video

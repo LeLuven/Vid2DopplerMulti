@@ -27,7 +27,7 @@ class VIBELoss(nn.Module):
             e_pose_loss_weight=1.,
             e_shape_loss_weight=0.001,
             d_motion_loss_weight=1.,
-            device='cuda',
+            device=None,
     ):
         super(VIBELoss, self).__init__()
         self.e_loss_weight = e_loss_weight
@@ -37,6 +37,13 @@ class VIBELoss(nn.Module):
         self.d_motion_loss_weight = d_motion_loss_weight
 
         self.device = device
+        if self.device is None:
+            if torch.cuda.is_available():
+                self.device = 'cuda'  
+            elif torch.xpu.is_available(): 
+                self.device = 'xpu'
+            else:
+                self.device = 'cpu'
         self.criterion_shape = nn.L1Loss().to(self.device)
         self.criterion_keypoints = nn.MSELoss(reduction='none').to(self.device)
         self.criterion_regr = nn.MSELoss().to(self.device)

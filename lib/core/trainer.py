@@ -108,7 +108,12 @@ class Trainer():
             self.writer = SummaryWriter(log_dir=self.logdir)
 
         if self.device is None:
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            if torch.cuda.is_available():
+                self.device = 'cuda'  
+            elif torch.xpu.is_available(): 
+                self.device = 'xpu'
+            else:
+                self.device = 'cpu'
 
         # Resume from a pretrained model
         if resume is not None:
