@@ -2,6 +2,7 @@
 output/
 outputs/
 data/**/output/
+hsnr_files/
 
 # Temporary files and directories
 tmp/

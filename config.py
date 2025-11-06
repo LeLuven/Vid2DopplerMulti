@@ -1,5 +1,20 @@
 import os
 
+LOG_EPS = 1e-9
+LOG_CLIP_MIN = 3.4
+LOG_CLIP_MAX = 3.9
+LOG_SCALE_DEFAULT = 1e4
+
+RANGE_MIN = 0
+RANGE_MAX = 1
+RANGE_BINS = 168
+VELOCITY_MIN = -1.5
+VELOCITY_MAX =  1.5
+VELOCITY_BINS = 128  
+VELOCITY_MASK_BINS = [62, 63, 64]  # Bins bei ~0 m/s
+RADAR_FPS = 12.5  # Hz
+EFFECTIVE_VELOCITY_BINS = 125  # nach Maskierung
+
 def get_paths(video_name, output_folder):
     """Gibt alle relevanten Pfade für ein Video zurück"""
     base_path = os.path.join(output_folder, video_name)
@@ -23,7 +38,9 @@ def get_paths(video_name, output_folder):
         'orig_height': os.path.join(base_path, 'vibe', 'orig_height.npy'),
         
         # Ausgabe-Dateien
-        'synth_doppler': os.path.join(base_path, 'doppler', 'synth_doppler.npy')
+        'synth_doppler': os.path.join(base_path, 'doppler', 'synth_doppler.npy'),
+        'range_doppler_maps': os.path.join(base_path, 'doppler', 'range_doppler_maps.npy'),
+        'range_doppler_maps_demo': os.path.join(base_path, 'doppler', 'range_doppler_maps_demo.npy'),
     }
     
     for key in ['vibe', 'positions', 'velocities', 'doppler', 'videos']:
