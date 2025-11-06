@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
-"""
-Korrigierte Hauptpipeline mit Range-Doppler-Features
-Verwendet die korrigierte Visualisierung mit richtiger Achsen-Orientierung
-"""
-
 import argparse
 import os
 import numpy as np
 import shutil
 from config import get_paths
+import sys
+import subprocess
 
 def main(args):
     # Video-Name extrahieren
@@ -41,12 +37,12 @@ def main(args):
     # 5. Doppler-Daten generieren
     print("\n[5/7] Doppler-Daten generieren...")
     os.system(f"python compute_synth_doppler.py --input_video {args.input_video} --output_folder {output_folder}")
-    
+
     # 6. Range-Doppler-Maps generieren
     print("\n[6/7] Range-Doppler-Maps generieren...")
     interpolate_flag = "--interpolate" if args.interpolate else ""
     os.system(f"python compute_range_doppler.py --input_video {args.input_video} --output_folder {output_folder} {interpolate_flag}")
-    
+
     # 7. Korrigierte Range-Doppler-Visualisierung
     if args.visualize_rd:
         print("\n[7/7] Korrigierte Range-Doppler-Visualisierung...")
@@ -69,10 +65,15 @@ def main(args):
     # Temporäre Dateien aufräumen
     try:
         paths = get_paths(video_name, output_folder)
-        image_folder = str(np.load(paths['image_folder']))
-        if os.path.exists(image_folder):
-            shutil.rmtree(image_folder)
-            print(f"\nTemporäre Bilddateien entfernt: {image_folder}")
+        image_folder_path = paths['image_folder']
+        # Lade den Pfad aus der .npy-Datei
+        if os.path.exists(image_folder_path):
+            image_folder = str(np.load(image_folder_path))
+            if os.path.exists(image_folder):
+                shutil.rmtree(image_folder)
+                print(f"\nTemporäre Bilddateien entfernt: {image_folder}")
+        else:
+             print(f"\nWarnung: 'image_folder.npy' nicht gefunden unter {image_folder_path}, konnte temporäre Dateien nicht löschen.")
     except Exception as e:
         print(f"\nWarnung: Konnte temporäre Dateien nicht entfernen: {e}")
     
@@ -84,7 +85,7 @@ def main(args):
     print(f" {paths['velocities']} - Geschwindigkeiten")
     print(f" {paths['doppler']} - Doppler-Daten")
     print(f" {paths['videos']} - Videos")
-    
+
     # Zeige Range-Doppler-Ergebnisse
     if os.path.exists(paths['range_doppler_maps']):
         rd_maps = np.load(paths['range_doppler_maps'])
@@ -94,10 +95,10 @@ def main(args):
         print(f" Dauer: {rd_maps.shape[0] / 12.5:.2f} Sekunden")
         print(f" Datei: {paths['range_doppler_maps']}")
         print(f" Daten-Range: {rd_maps.min():.8f} bis {rd_maps.max():.8f}")
-    
+
     if args.visualize_rd:
         corrected_path = os.path.join(paths['videos'], f"{video_name}_range_doppler_corrected.mp4")
-        
+
         if os.path.exists(corrected_path):
             print(f"\nKorrigiertes Range-Doppler-Video erstellt:")
             print(f" Datei: {corrected_path}")

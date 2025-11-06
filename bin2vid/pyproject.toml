@@ -1,0 +1,16 @@
+[project]
+name = "bin2vid"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pandas",
+    "python-dateutil",
+    "pytz",
+    "scipy",
+    "six",
+    "tzdata",
+]

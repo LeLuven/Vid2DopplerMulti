@@ -1,5 +1,5 @@
 setuptools
-numpy
+numpy<2.0.0
 matplotlib
 scipy
 pyopengl

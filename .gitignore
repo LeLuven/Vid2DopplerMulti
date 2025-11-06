@@ -61,3 +61,6 @@ env/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+!spin_model_checkpoint.pth.tar
+!vibe_model_w_3dpw.pth.tar
+!vibe_model_wo_3dpw.pth.tar

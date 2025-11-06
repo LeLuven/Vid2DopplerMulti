@@ -1,0 +1,9 @@
+numpy
+opencv-python
+pandas
+python-dateutil
+pytz
+scipy
+six
+tzdata
+tkinter

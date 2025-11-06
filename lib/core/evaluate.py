@@ -48,7 +48,12 @@ class Evaluator():
         self.evaluation_accumulators = dict.fromkeys(['pred_j3d', 'target_j3d', 'target_theta', 'pred_verts'])
 
         if self.device is None:
-            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            if torch.cuda.is_available():
+                self.device = 'cuda'  
+            elif torch.xpu.is_available(): 
+                self.device = 'xpu'
+            else:
+                self.device = 'cpu'
 
     def validate(self):
         self.model.eval()
