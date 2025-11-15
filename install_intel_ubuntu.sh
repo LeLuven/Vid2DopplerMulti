@@ -12,7 +12,6 @@
 #
 # =============================================================================
 
-# --- Bricht bei Fehlern sofort ab ---
 set -e
 
 # --- Globale Variablen ---
@@ -51,7 +50,7 @@ if ! uname -r | grep -q 'oem'; then
     echo "Führe dieses Skript nach dem Neustart einfach erneut aus."
     exit 1
 else
-    echo "OEM-Kernel ist aktiv ($(uname -r)). Sehr gut."
+    echo "OEM-Kernel ist aktiv ($(uname -r))."
 fi
 
 # =============================================================================

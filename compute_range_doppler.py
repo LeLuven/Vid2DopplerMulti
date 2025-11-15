@@ -12,6 +12,7 @@ import os
 import argparse
 import numpy as np
 import cv2
+from scipy.interpolate import interp1d
 from config import (
     get_paths, get_frame_path,
     RANGE_MIN, RANGE_MAX, RANGE_BINS,
@@ -148,15 +149,47 @@ def to_demo_format(H_range_velocity_masked: np.ndarray, log_scale: float, do_log
 
 def temporal_resample_to_radar_fps(frames_arr: np.ndarray, input_fps: float) -> np.ndarray:
     """
-    frames_arr: (T, H, W) → Mittelung von Video-FPS auf RADAR_FPS (12.5 Hz)
+    frames_arr: (T, H, W) → Resampling von Video-FPS auf RADAR_FPS (12.5 Hz)
+    Verwendet lineare Interpolation, um die Framerate exakt anzupassen.
     """
-    if input_fps <= 0:
-        return frames_arr
-    window = max(1, int(round(input_fps / RADAR_FPS)))
-    out = []
-    for i in range(0, frames_arr.shape[0], window):
-        out.append(frames_arr[i:i + window].mean(axis=0))
-    return np.asarray(out, dtype=np.float32)
+    if input_fps <= 0 or abs(input_fps - RADAR_FPS) < 0.1:
+        return frames_arr.astype(np.float32)
+
+    num_input_frames = frames_arr.shape[0]
+    if num_input_frames == 0:
+        return np.array([], dtype=np.float32)
+
+    duration_sec = num_input_frames / input_fps
+
+    # Berechne die Ziel-Anzahl an Frames
+    # z.B. (4867 Frames / 30 FPS) * 12.5 FPS = 162.23s * 12.5 FPS = 2027.9 -> 2028 Frames
+    num_target_frames = int(round(duration_sec * RADAR_FPS))
+
+    if num_target_frames <= 0:
+        return np.array([], dtype=frames_arr.dtype)
+
+    # Erstelle Zeit-Achsen für Input und Output
+    t_in = np.linspace(0, duration_sec, num_input_frames)
+    t_out = np.linspace(0, duration_sec, num_target_frames)
+
+    orig_shape = frames_arr.shape
+    data_flat = frames_arr.reshape(num_input_frames, -1)
+
+    try:
+        # 'fill_value="extrapolate"' fängt numerische Ungenauigkeiten an den Rändern ab
+        f = interp1d(t_in, data_flat, axis=0, kind='linear', fill_value="extrapolate")
+    except ValueError as e:
+        print(f"[WARNUNG] Interpolation fehlgeschlagen (Input={num_input_frames} Frames), verwende Fallback. Fehler: {e}")
+        window = max(1, int(round(input_fps / RADAR_FPS)))
+        out = []
+        for i in range(0, frames_arr.shape[0], window):
+            out.append(frames_arr[i:i + window].mean(axis=0))
+        return np.asarray(out, dtype=np.float32)
+
+    data_flat_resampled = f(t_out)
+    data_resampled = data_flat_resampled.reshape(num_target_frames, orig_shape[1], orig_shape[2])
+
+    return data_resampled.astype(np.float32)
 
 
 def auto_calibrate_log_scale(frames_rv, percentile=95, target_db=3.7):
@@ -211,7 +244,7 @@ def main(args):
         assert velocity is not None, f"Fehlende Velocities-Datei: {vel_file}"
 
         range_values = compute_distance(pos, sensor_position)
-        print(f"[DBG] rng {range_values.min():.2f}..{range_values.max():.2f}  vel {velocity.min():.2f}..{velocity.max():.2f}")
+        # print(f"[DBG] rng {range_values.min():.2f}..{range_values.max():.2f}  vel {velocity.min():.2f}..{velocity.max():.2f}")
 
         visibility = enforce_strict_visibility_equality(vis_p, vis_v, idx)
 
